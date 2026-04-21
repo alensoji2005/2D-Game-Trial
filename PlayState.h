@@ -5,8 +5,9 @@
 #include "GameObject.h"
 #include "NPC.h"
 #include "Map.h"
+#include <vector> // NEW: For our dynamic list of enemies
 #include <SDL2/SDL_mixer.h>
-#include <SDL2/SDL_ttf.h> // NEW
+#include <SDL2/SDL_ttf.h> 
 
 class PlayState : public GameState {
 public:
@@ -20,7 +21,7 @@ private:
     static const std::string stateID;
     
     GameObject* player;
-    NPC* townGuard;
+    std::vector<NPC*> enemies; // NEW: A dynamic list instead of a single NPC
     Map* map;
     
     Mix_Music* bgMusic;

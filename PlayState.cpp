@@ -3,6 +3,7 @@
 #include "SoundManager.h"
 #include "UIManager.h"
 #include <iostream>
+#include <fstream> // NEW: For reading the entities file
 
 const std::string PlayState::stateID = "PLAY";
 
@@ -28,7 +29,23 @@ bool PlayState::onEnter() {
     map->LoadMap("level1.txt"); 
     
     player = new GameObject("player.png", game->getRenderer(), 350, 250);
-    townGuard = new NPC("player.png", game->getRenderer(), 450, 350);
+    
+    // --- NEW: Dynamic Entity Loading ---
+    std::ifstream file("entities.txt");
+    if (file.is_open()) {
+        std::string type, texture;
+        int startX, startY;
+        
+        // Read the file line by line (Type, Texture, X, Y)
+        while (file >> type >> texture >> startX >> startY) {
+            if (type == "NPC") {
+                enemies.push_back(new NPC(texture.c_str(), game->getRenderer(), startX, startY));
+            }
+        }
+        file.close();
+    } else {
+        std::cout << "Could not load entities.txt" << std::endl;
+    }
     
     // Load Audio
     bgMusic = SoundManager::loadMusic("bgm.mp3");
@@ -47,7 +64,13 @@ bool PlayState::onExit() {
     std::cout << "Exiting Play State" << std::endl;
     
     delete player;
-    delete townGuard;
+    
+    // Safely delete every enemy in our dynamic list
+    for (auto enemy : enemies) {
+        delete enemy;
+    }
+    enemies.clear(); // Empty the list
+    
     delete map;
     
     Mix_FreeMusic(bgMusic);
@@ -85,17 +108,21 @@ void PlayState::update() {
         
         SDL_Rect attackBox = player->getAttackCollider();
         
-        // If the NPC is alive, and your sword hits them...
-        if (townGuard->getIsActive() && checkCollision(attackBox, townGuard->getCollider())) {
-            townGuard->takeDamage(10); // Deal 10 damage!
-            if (bumpSound) SoundManager::playSound(bumpSound);
-            std::cout << "HIT! Guard Health: " << townGuard->getHealth() << std::endl;
+        // Check sword hit against EVERY enemy in the list!
+        for (auto enemy : enemies) {
+            if (enemy->getIsActive() && checkCollision(attackBox, enemy->getCollider())) {
+                enemy->takeDamage(10); // Deal 10 damage!
+                if (bumpSound) SoundManager::playSound(bumpSound);
+                std::cout << "HIT! Enemy Health: " << enemy->getHealth() << std::endl;
+            }
         }
     }
 
     // 2. Update logic
     player->update();
-    if (townGuard->getIsActive()) townGuard->update();
+    for (auto enemy : enemies) {
+        if (enemy->getIsActive()) enemy->update();
+    }
 
     // 3. Wall Collisions (Player)
     SDL_Rect col = player->getCollider();
@@ -105,24 +132,27 @@ void PlayState::update() {
     }
 
     // 4. Wall Collisions (NPC)
-    if (townGuard->getIsActive()) {
-        SDL_Rect npcCol = townGuard->getCollider();
-        if (map->isSolid(npcCol.x, npcCol.y) || map->isSolid(npcCol.x + npcCol.w, npcCol.y) || 
-            map->isSolid(npcCol.x, npcCol.y + npcCol.h) || map->isSolid(npcCol.x + npcCol.w, npcCol.y + npcCol.h)) {
-            townGuard->revertMovement();
-            townGuard->setVelocity(0, 0);
+    for (auto enemy : enemies) {
+        if (enemy->getIsActive()) {
+            SDL_Rect npcCol = enemy->getCollider();
+            if (map->isSolid(npcCol.x, npcCol.y) || map->isSolid(npcCol.x + npcCol.w, npcCol.y) || 
+                map->isSolid(npcCol.x, npcCol.y + npcCol.h) || map->isSolid(npcCol.x + npcCol.w, npcCol.y + npcCol.h)) {
+                enemy->revertMovement();
+                enemy->setVelocity(0, 0);
+            }
         }
     }
 
     // 5. Entity Collisions & Dialogue Trigger
-    // We only bump into the guard if they are still alive!
-    if (townGuard->getIsActive() && checkCollision(player->getCollider(), townGuard->getCollider())) {
-        player->revertMovement();
-        townGuard->revertMovement();
-        townGuard->setVelocity(0, 0);
-        
-        isDialogueActive = true;
-        currentDialogue = "Town Guard: Ouch! Stop pushing me!";
+    for (auto enemy : enemies) {
+        if (enemy->getIsActive() && checkCollision(player->getCollider(), enemy->getCollider())) {
+            player->revertMovement();
+            enemy->revertMovement();
+            enemy->setVelocity(0, 0);
+            
+            isDialogueActive = true;
+            currentDialogue = "NPC: Ouch! Stop pushing me!";
+        }
     }
 
     // 6. Camera Tracking
@@ -139,7 +169,12 @@ void PlayState::render() {
     SDL_RenderClear(game->getRenderer());
     
     map->DrawMap(camera);
-    townGuard->render(camera);
+    
+    // Draw all enemies!
+    for (auto enemy : enemies) {
+        enemy->render(camera);
+    }
+    
     player->render(camera);
     
     // --- NEW: Draw the UI on top of everything else ---
