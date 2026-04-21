@@ -5,7 +5,8 @@
 #include "GameObject.h"
 #include "NPC.h"
 #include "Map.h"
-#include <vector> // NEW: For our dynamic list of enemies
+#include "Projectile.h" // NEW: Include our new class
+#include <vector>
 #include <SDL2/SDL_mixer.h>
 #include <SDL2/SDL_ttf.h> 
 
@@ -21,7 +22,8 @@ private:
     static const std::string stateID;
     
     GameObject* player;
-    std::vector<NPC*> enemies; // NEW: A dynamic list instead of a single NPC
+    std::vector<NPC*> enemies;
+    std::vector<Projectile*> projectiles; // NEW: Track active fireballs
     Map* map;
     
     Mix_Music* bgMusic;

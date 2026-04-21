@@ -3,12 +3,13 @@
 #include "SoundManager.h"
 #include "UIManager.h"
 #include <iostream>
-#include <fstream> // NEW: For reading the entities file
+#include <fstream> 
 
 const std::string PlayState::stateID = "PLAY";
 
-// We need a cooldown so you don't hit the enemy 60 times a second holding the button down
+// Cooldowns
 int attackCooldown = 0;
+int magicCooldown = 0; // NEW: Cooldown for the fireball
 
 bool PlayState::checkCollision(SDL_Rect a, SDL_Rect b) {
     if (a.x + a.w <= b.x) return false;
@@ -21,22 +22,18 @@ bool PlayState::checkCollision(SDL_Rect a, SDL_Rect b) {
 bool PlayState::onEnter() {
     std::cout << "Entering Play State" << std::endl;
     
-    // Set up the camera
     camera = {0, 0, 800, 600};
     
-    // Spawn our world
     map = new Map(game->getRenderer());
     map->LoadMap("level1.txt"); 
     
     player = new GameObject("player.png", game->getRenderer(), 350, 250);
     
-    // --- NEW: Dynamic Entity Loading ---
     std::ifstream file("entities.txt");
     if (file.is_open()) {
         std::string type, texture;
         int startX, startY;
         
-        // Read the file line by line (Type, Texture, X, Y)
         while (file >> type >> texture >> startX >> startY) {
             if (type == "NPC") {
                 enemies.push_back(new NPC(texture.c_str(), game->getRenderer(), startX, startY));
@@ -47,12 +44,10 @@ bool PlayState::onEnter() {
         std::cout << "Could not load entities.txt" << std::endl;
     }
     
-    // Load Audio
     bgMusic = SoundManager::loadMusic("bgm.mp3");
     bumpSound = SoundManager::loadSound("bump.wav");
     if (bgMusic) SoundManager::playMusic(bgMusic);
 
-    // Load Fonts & Init Dialogue
     font = UIManager::loadFont("font.ttf", 24);
     isDialogueActive = false;
     currentDialogue = "";
@@ -65,11 +60,16 @@ bool PlayState::onExit() {
     
     delete player;
     
-    // Safely delete every enemy in our dynamic list
     for (auto enemy : enemies) {
         delete enemy;
     }
-    enemies.clear(); // Empty the list
+    enemies.clear(); 
+    
+    // NEW: Safely delete all remaining projectiles
+    for (auto p : projectiles) {
+        delete p;
+    }
+    projectiles.clear();
     
     delete map;
     
@@ -83,13 +83,11 @@ bool PlayState::onExit() {
 void PlayState::update() {
     const Uint8* currentKeyStates = SDL_GetKeyboardState(NULL);
 
-    // --- DIALOGUE FREEZE LOGIC ---
     if (isDialogueActive) {
-        // If they are talking, block all movement and wait for SPACEBAR
         if (currentKeyStates[SDL_SCANCODE_SPACE]) {
-            isDialogueActive = false; // Dismiss the dialogue
+            isDialogueActive = false; 
         }
-        return; // Skip the rest of the update loop!
+        return; 
     }
 
     // 1. Handle Input locally
@@ -100,28 +98,78 @@ void PlayState::update() {
     if (currentKeyStates[SDL_SCANCODE_D]) dx = 1;
     player->setVelocity(dx, dy);
 
-    // --- NEW: COMBAT INPUT (Press 'J' to Attack) ---
-    if (attackCooldown > 0) attackCooldown--; // Reduce cooldown timer
+    // --- MELEE COMBAT (Press 'J') ---
+    if (attackCooldown > 0) attackCooldown--; 
     
     if (currentKeyStates[SDL_SCANCODE_J] && attackCooldown == 0) {
-        attackCooldown = 30; // Half a second cooldown before you can swing again
+        attackCooldown = 30; 
         
         SDL_Rect attackBox = player->getAttackCollider();
         
-        // Check sword hit against EVERY enemy in the list!
         for (auto enemy : enemies) {
             if (enemy->getIsActive() && checkCollision(attackBox, enemy->getCollider())) {
-                enemy->takeDamage(10); // Deal 10 damage!
+                enemy->takeDamage(10); 
                 if (bumpSound) SoundManager::playSound(bumpSound);
-                std::cout << "HIT! Enemy Health: " << enemy->getHealth() << std::endl;
+                std::cout << "MELEE HIT! Enemy Health: " << enemy->getHealth() << std::endl;
             }
         }
     }
 
-    // 2. Update logic
+    // --- NEW: MAGIC COMBAT (Press 'K') ---
+    if (magicCooldown > 0) magicCooldown--;
+    
+    if (currentKeyStates[SDL_SCANCODE_K] && magicCooldown == 0) {
+        magicCooldown = 45; // 0.75 second cooldown for magic
+        
+        SDL_Rect pCol = player->getCollider();
+        SDL_Rect aBox = player->getAttackCollider();
+        int dirX = 0, dirY = 0;
+        
+        // Cleverly figure out which way the player is facing based on the attack box
+        if (aBox.x < pCol.x) dirX = -1;
+        else if (aBox.x > pCol.x) dirX = 1;
+        else if (aBox.y < pCol.y) dirY = -1;
+        else if (aBox.y > pCol.y) dirY = 1;
+        
+        // Spawn a fireball slightly offset to come out of the center of the player
+        projectiles.push_back(new Projectile(game->getRenderer(), pCol.x + 8, pCol.y + 8, dirX, dirY));
+        if (bumpSound) SoundManager::playSound(bumpSound); // Reuse sound for shooting
+    }
+
+    // 2. Update logic for Player, Enemies, and Projectiles
     player->update();
     for (auto enemy : enemies) {
         if (enemy->getIsActive()) enemy->update();
+    }
+    
+    // --- NEW: PROJECTILE LOGIC & MEMORY CLEANUP ---
+    for (auto it = projectiles.begin(); it != projectiles.end(); ) {
+        Projectile* p = *it;
+        if (p->getIsActive()) {
+            p->update();
+            
+            // Check Projectile Wall Collision
+            SDL_Rect pCol = p->getCollider();
+            if (map->isSolid(pCol.x, pCol.y) || map->isSolid(pCol.x + pCol.w, pCol.y) || 
+                map->isSolid(pCol.x, pCol.y + pCol.h) || map->isSolid(pCol.x + pCol.w, pCol.y + pCol.h)) {
+                p->destroy(); // Hit a wall
+            }
+            
+            // Check Projectile Enemy Collision
+            for (auto enemy : enemies) {
+                if (enemy->getIsActive() && checkCollision(pCol, enemy->getCollider())) {
+                    enemy->takeDamage(15); // Magic does 15 damage!
+                    p->destroy(); // Hit an enemy
+                    if (bumpSound) SoundManager::playSound(bumpSound);
+                    std::cout << "MAGIC HIT! Enemy Health: " << enemy->getHealth() << std::endl;
+                }
+            }
+            ++it;
+        } else {
+            // Safely delete destroyed projectiles from memory
+            delete p;
+            it = projectiles.erase(it);
+        }
     }
 
     // 3. Wall Collisions (Player)
@@ -170,16 +218,18 @@ void PlayState::render() {
     
     map->DrawMap(camera);
     
-    // Draw all enemies!
     for (auto enemy : enemies) {
-        enemy->render(camera);
+        if (enemy->getIsActive()) enemy->render(camera);
+    }
+    
+    // --- NEW: Draw all active projectiles ---
+    for (auto p : projectiles) {
+        p->render(camera);
     }
     
     player->render(camera);
     
-    // --- NEW: Draw the UI on top of everything else ---
-    // Draw the player's Health Bar Text in the top left corner!
-    SDL_Color hpColor = {255, 50, 50, 255}; // Red
+    SDL_Color hpColor = {255, 50, 50, 255}; 
     UIManager::drawText(game->getRenderer(), font, "Player HP: " + std::to_string(player->getHealth()), 20, 20, hpColor);
 
     if (isDialogueActive) {
