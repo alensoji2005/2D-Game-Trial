@@ -6,46 +6,53 @@
 class GameObject {
 public:
     GameObject(const char* textureSheet, SDL_Renderer* renderer, int x, int y);
-    virtual ~GameObject();
+    ~GameObject();
 
-    virtual void update();
+    void update();
     void render(SDL_Rect camera);
-    
-    // New method to accept input commands
-    void setVelocity(int dx, int dy);
+
 
     // Collision helper methods
     SDL_Rect getCollider();
     void revertMovement();
     
-    // --- NEW: Combat Methods ---
+    // Combat Methods
     bool getIsActive() { return isActive; }
     int getHealth() { return health; }
     void takeDamage(int amount);
-    SDL_Rect getAttackCollider(); // Gets the hitbox for a sword swing
+    SDL_Rect getAttackCollider(); 
+    
+    // --- NEW: Animation Trigger Methods ---
+    void triggerAttack();
+    bool getIsAttacking() { return isAttacking; }
     
     // Getters for camera tracking
     int getX() { return xpos; }
     int getY() { return ypos; }
 
+    void setVelocity(int dx, int dy) {
+        xVel = dx;
+        yVel = dy;
+    }
+
 protected:
-    int xpos;
-    int ypos;
-    
-    // New variables for movement math
-    int xVel;
-    int yVel;
+    int xpos, ypos;
+    int xVel, yVel;
     int speed;
 
     // Animation tracking variables
     int currentFrame;
     int currentRow;
     
-    // --- NEW: Combat Variables ---
+    // Combat Variables
     int health;
     int maxHealth;
-    bool isActive; // True if alive, False if defeated
-    int lastDir;   // Tracks the direction we are facing (0=Down, 1=Left, 2=Right, 3=Up)
+    bool isActive; 
+    int lastDir;   
+    
+    // --- NEW: Attack Animation State Variables ---
+    bool isAttacking;
+    int attackTimer;
 
     SDL_Texture* objTexture;
     SDL_Rect srcRect, destRect; 
