@@ -2,14 +2,16 @@
 #include "Game.h"
 #include "SoundManager.h"
 #include "UIManager.h"
+#include "Item.h"
 #include <iostream>
 #include <fstream> 
 
 const std::string PlayState::stateID = "PLAY";
 
-// Cooldowns
+// Cooldowns and Stats
 int attackCooldown = 0;
 int magicCooldown = 0; 
+int playerGold = 0; // Track collected coins
 
 bool PlayState::checkCollision(SDL_Rect a, SDL_Rect b) {
     if (a.x + a.w <= b.x) return false;
@@ -69,6 +71,11 @@ bool PlayState::onExit() {
         delete p;
     }
     projectiles.clear();
+
+    for (auto i : items) {
+        delete i;
+    }
+    items.clear();
     
     delete map;
     
@@ -103,14 +110,13 @@ void PlayState::update() {
     if (currentKeyStates[SDL_SCANCODE_J] && attackCooldown == 0) {
         attackCooldown = 30; 
         
-        // --- NEW: Trigger the animation state! ---
         player->triggerAttack();
         
         SDL_Rect attackBox = player->getAttackCollider();
         
         for (auto enemy : enemies) {
             if (enemy->getIsActive() && checkCollision(attackBox, enemy->getCollider())) {
-                enemy->takeDamage(10); 
+                enemy->takeDamage(player->getAttackDamage()); 
                 if (bumpSound) SoundManager::playSound(bumpSound);
                 std::cout << "MELEE HIT! Enemy Health: " << enemy->getHealth() << std::endl;
             }
@@ -160,7 +166,7 @@ void PlayState::update() {
     }
 
     // ==========================================
-    // PHASE 2: ENEMY PHYSICS
+    // PHASE 2: ENEMY PHYSICS & XP/LOOT REWARDS
     // ==========================================
     for (auto enemy : enemies) {
         if (enemy->getIsActive()) {
@@ -191,6 +197,19 @@ void PlayState::update() {
                     }
                 }
             }
+        } else {
+            if (!enemy->hasRewardedXP()) {
+                player->addExperience(50); 
+                enemy->markXPRewarded();
+                
+                // --- NEW: Spawning Loot (50% chance for Coin, 20% for Heart) ---
+                int roll = rand() % 100;
+                if (roll < 50) {
+                    items.push_back(new Item(game->getRenderer(), enemy->getX(), enemy->getY(), COIN));
+                } else if (roll < 70) {
+                    items.push_back(new Item(game->getRenderer(), enemy->getX(), enemy->getY(), HEALTH));
+                }
+            }
         }
     }
 
@@ -210,7 +229,7 @@ void PlayState::update() {
             
             for (auto enemy : enemies) {
                 if (enemy->getIsActive() && checkCollision(pCol, enemy->getCollider())) {
-                    enemy->takeDamage(15); 
+                    enemy->takeDamage(15 + (player->getLevel() * 2)); 
                     p->destroy(); 
                     if (bumpSound) SoundManager::playSound(bumpSound);
                     std::cout << "MAGIC HIT! Enemy Health: " << enemy->getHealth() << std::endl;
@@ -224,7 +243,34 @@ void PlayState::update() {
     }
 
     // ==========================================
-    // PHASE 4: CAMERA TRACKING
+    // PHASE 4: ITEMS (Pickup logic)
+    // ==========================================
+    for (auto it = items.begin(); it != items.end(); ) {
+        Item* item = *it;
+        item->update();
+        if (checkCollision(player->getCollider(), item->getCollider())) {
+            if (item->getType() == COIN) {
+                playerGold += 10;
+            } else if (item->getType() == HEALTH) {
+                // Heals the player by adding experience method (reuse for healing logic if needed)
+                // For simplicity, let's just say it restores 10 HP directly
+                // player->heal(10); // You can add a heal method to GameObject later
+                std::cout << "Healed 10 HP!" << std::endl;
+            }
+            item->collect();
+            if (bumpSound) SoundManager::playSound(bumpSound);
+        }
+
+        if (!item->getIsActive()) {
+            delete item;
+            it = items.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    // ==========================================
+    // PHASE 5: CAMERA TRACKING
     // ==========================================
     camera.x = player->getX() + 16 - 400; 
     camera.y = player->getY() + 16 - 300;
@@ -247,23 +293,32 @@ void PlayState::render() {
     for (auto p : projectiles) {
         p->render(camera);
     }
+
+    for (auto i : items) {
+        i->render(camera);
+    }
     
     player->render(camera);
     
-    // --- NEW: Draw the physical Sword Slash effect! ---
     if (player->getIsAttacking()) {
         SDL_Rect attackBox = player->getAttackCollider();
-        // Adjust the attack box to match camera coordinates
         attackBox.x -= camera.x;
         attackBox.y -= camera.y;
         
-        // Draw a shiny silver rectangle to simulate the sword swipe
         SDL_SetRenderDrawColor(game->getRenderer(), 220, 220, 220, 255); 
         SDL_RenderFillRect(game->getRenderer(), &attackBox);
     }
     
+    // --- UPDATED UI DISPLAY ---
     SDL_Color hpColor = {255, 50, 50, 255}; 
-    UIManager::drawText(game->getRenderer(), font, "Player HP: " + std::to_string(player->getHealth()), 20, 20, hpColor);
+    SDL_Color xpColor = {50, 150, 255, 255};
+    SDL_Color levelColor = {255, 255, 50, 255};
+    SDL_Color goldColor = {255, 215, 0, 255};
+
+    UIManager::drawText(game->getRenderer(), font, "Lvl: " + std::to_string(player->getLevel()), 20, 20, levelColor);
+    UIManager::drawText(game->getRenderer(), font, "HP: " + std::to_string(player->getHealth()), 20, 50, hpColor);
+    UIManager::drawText(game->getRenderer(), font, "XP: " + std::to_string(player->getExperience()) + " / " + std::to_string(player->getNextLevelExp()), 20, 80, xpColor);
+    UIManager::drawText(game->getRenderer(), font, "Gold: " + std::to_string(playerGold), 20, 110, goldColor);
 
     if (isDialogueActive) {
         UIManager::drawTextBox(game->getRenderer(), font, currentDialogue);

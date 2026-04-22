@@ -5,7 +5,8 @@
 #include "GameObject.h"
 #include "NPC.h"
 #include "Map.h"
-#include "Projectile.h" // NEW: Include our new class
+#include "Projectile.h" 
+#include "Item.h" // NEW: Include the Item class
 #include <vector>
 #include <SDL2/SDL_mixer.h>
 #include <SDL2/SDL_ttf.h> 
@@ -23,13 +24,14 @@ private:
     
     GameObject* player;
     std::vector<NPC*> enemies;
-    std::vector<Projectile*> projectiles; // NEW: Track active fireballs
+    std::vector<Projectile*> projectiles; 
+    std::vector<Item*> items; // NEW: Track dropped items on the ground
     Map* map;
     
     Mix_Music* bgMusic;
     Mix_Chunk* bumpSound;
     
-    // --- NEW: UI Variables ---
+    // --- UI Variables ---
     TTF_Font* font;
     bool isDialogueActive;
     std::string currentDialogue;
