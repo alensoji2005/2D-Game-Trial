@@ -3,7 +3,7 @@
 #include "SoundManager.h"
 #include "UIManager.h"
 #include "Item.h"
-#include "GameOverState.h" // --- NEW: Include the Game Over State ---
+#include "GameOverState.h" 
 #include <iostream>
 #include <fstream> 
 
@@ -13,7 +13,6 @@ const std::string PlayState::stateID = "PLAY";
 int attackCooldown = 0;
 int magicCooldown = 0; 
 int playerGold = 0; 
-// To prevent enemies from hitting you 60 times a second, we give the player invincibility frames
 int invincibilityFrames = 0; 
 
 bool PlayState::checkCollision(SDL_Rect a, SDL_Rect b) {
@@ -51,19 +50,19 @@ bool PlayState::onExit() {
     
     delete player;
     
-    for (auto enemy : enemies) {
-        delete enemy;
-    }
+    for (auto enemy : enemies) delete enemy;
     enemies.clear(); 
     
-    for (auto p : projectiles) {
-        delete p;
-    }
+    for (auto boss : bosses) delete boss;
+    bosses.clear();
+    
+    for (auto p : projectiles) delete p;
     projectiles.clear();
 
-    for (auto i : items) {
-        delete i;
-    }
+    for (auto ep : enemyProjectiles) delete ep;
+    enemyProjectiles.clear();
+
+    for (auto i : items) delete i;
     items.clear();
     
     if (map != nullptr) delete map;
@@ -76,10 +75,9 @@ bool PlayState::onExit() {
 }
 
 void PlayState::update() {
-    // --- NEW: Check for Player Death ---
     if (player->getHealth() <= 0) {
         game->getStateMachine()->changeState(new GameOverState());
-        return; // Stop updating the game, we are dead!
+        return; 
     }
 
     const Uint8* currentKeyStates = SDL_GetKeyboardState(NULL);
@@ -115,7 +113,15 @@ void PlayState::update() {
             if (enemy->getIsActive() && checkCollision(attackBox, enemy->getCollider())) {
                 enemy->takeDamage(player->getAttackDamage()); 
                 if (bumpSound) SoundManager::playSound(bumpSound);
-                std::cout << "MELEE HIT! Enemy Health: " << enemy->getHealth() << std::endl;
+            }
+        }
+        
+        // Check melee against bosses
+        for (auto boss : bosses) {
+            if (boss->getIsActive() && checkCollision(attackBox, boss->getCollider())) {
+                boss->takeDamage(player->getAttackDamage()); 
+                if (bumpSound) SoundManager::playSound(bumpSound);
+                std::cout << "HIT BOSS! Boss HP: " << boss->getHealth() << std::endl;
             }
         }
     }
@@ -144,7 +150,6 @@ void PlayState::update() {
     // ==========================================
     player->update();
     
-    // Map Transition Trigger (Walk off the right edge)
     if (player->getX() >= 930) {
         currentLevel++;
         loadLevel(currentLevel);
@@ -167,10 +172,16 @@ void PlayState::update() {
                 break; 
             }
         }
+        for (auto boss : bosses) {
+            if (boss->getIsActive() && checkCollision(player->getCollider(), boss->getCollider())) {
+                player->revertMovement();
+                break; 
+            }
+        }
     }
 
     // ==========================================
-    // PHASE 2: ENEMY PHYSICS & XP/LOOT REWARDS
+    // PHASE 2: ENEMY & BOSS PHYSICS
     // ==========================================
     for (auto enemy : enemies) {
         if (enemy->getIsActive()) {
@@ -191,12 +202,10 @@ void PlayState::update() {
                 enemy->setVelocity(0, 0);
                 enemyReverted = true;
                 
-                // --- NEW: Enemies deal damage to the player! ---
                 if (invincibilityFrames == 0) {
-                    player->takeDamage(5); // Enemy hits for 5 damage
-                    invincibilityFrames = 60; // 1 second of invincibility
+                    player->takeDamage(5); 
+                    invincibilityFrames = 60; 
                     if (bumpSound) SoundManager::playSound(bumpSound);
-                    std::cout << "Ouch! Player HP: " << player->getHealth() << std::endl;
                 }
             }
 
@@ -215,17 +224,54 @@ void PlayState::update() {
                 enemy->markXPRewarded();
                 
                 int roll = rand() % 100;
-                if (roll < 50) {
-                    items.push_back(new Item(game->getRenderer(), enemy->getX(), enemy->getY(), COIN));
-                } else if (roll < 70) {
-                    items.push_back(new Item(game->getRenderer(), enemy->getX(), enemy->getY(), HEALTH));
+                if (roll < 50) items.push_back(new Item(game->getRenderer(), enemy->getX(), enemy->getY(), COIN));
+                else if (roll < 70) items.push_back(new Item(game->getRenderer(), enemy->getX(), enemy->getY(), HEALTH));
+            }
+        }
+    }
+
+    // Boss Logic
+    for (auto boss : bosses) {
+        if (boss->getIsActive()) {
+            // Boss passes the enemyProjectiles list so it can shoot!
+            boss->update(player->getCollider(), enemyProjectiles);
+            
+            SDL_Rect bossCol = boss->getCollider();
+            bool bossReverted = false;
+
+            if (map->isSolid(bossCol.x, bossCol.y) || map->isSolid(bossCol.x + bossCol.w, bossCol.y) || 
+                map->isSolid(bossCol.x, bossCol.y + bossCol.h) || map->isSolid(bossCol.x + bossCol.w, bossCol.y + bossCol.h)) {
+                boss->revertMovement();
+                boss->setVelocity(0, 0);
+                bossReverted = true;
+            }
+            
+            if (!bossReverted && checkCollision(boss->getCollider(), player->getCollider())) {
+                boss->revertMovement();
+                boss->setVelocity(0, 0);
+                
+                if (invincibilityFrames == 0) {
+                    player->takeDamage(15); // Bosses deal heavy contact damage
+                    invincibilityFrames = 60; 
+                    if (bumpSound) SoundManager::playSound(bumpSound);
                 }
+            }
+        } else {
+            if (!boss->hasRewardedXP()) {
+                player->addExperience(500); // Bosses give massive XP
+                boss->markXPRewarded();
+                
+                // Loot Explosion!
+                for (int i = 0; i < 5; i++) {
+                    items.push_back(new Item(game->getRenderer(), boss->getX() + (rand() % 64), boss->getY() + (rand() % 64), COIN));
+                }
+                items.push_back(new Item(game->getRenderer(), boss->getX() + 32, boss->getY() + 32, HEALTH));
             }
         }
     }
 
     // ==========================================
-    // PHASE 3: PROJECTILES
+    // PHASE 3: PROJECTILES (Friendly and Enemy)
     // ==========================================
     for (auto it = projectiles.begin(); it != projectiles.end(); ) {
         Projectile* p = *it;
@@ -243,13 +289,45 @@ void PlayState::update() {
                     enemy->takeDamage(15 + (player->getLevel() * 2)); 
                     p->destroy(); 
                     if (bumpSound) SoundManager::playSound(bumpSound);
-                    std::cout << "MAGIC HIT! Enemy Health: " << enemy->getHealth() << std::endl;
+                }
+            }
+            for (auto boss : bosses) {
+                if (boss->getIsActive() && checkCollision(pCol, boss->getCollider())) {
+                    boss->takeDamage(15 + (player->getLevel() * 2)); 
+                    p->destroy(); 
+                    if (bumpSound) SoundManager::playSound(bumpSound);
                 }
             }
             ++it;
         } else {
             delete p;
             it = projectiles.erase(it);
+        }
+    }
+
+    for (auto it = enemyProjectiles.begin(); it != enemyProjectiles.end(); ) {
+        Projectile* p = *it;
+        if (p->getIsActive()) {
+            p->update();
+            
+            SDL_Rect pCol = p->getCollider();
+            if (map->isSolid(pCol.x, pCol.y) || map->isSolid(pCol.x + pCol.w, pCol.y) || 
+                map->isSolid(pCol.x, pCol.y + pCol.h) || map->isSolid(pCol.x + pCol.w, pCol.y + pCol.h)) {
+                p->destroy(); 
+            }
+            
+            if (checkCollision(pCol, player->getCollider())) {
+                if (invincibilityFrames == 0) {
+                    player->takeDamage(10); 
+                    invincibilityFrames = 60; 
+                    if (bumpSound) SoundManager::playSound(bumpSound);
+                }
+                p->destroy(); 
+            }
+            ++it;
+        } else {
+            delete p;
+            it = enemyProjectiles.erase(it);
         }
     }
 
@@ -263,8 +341,7 @@ void PlayState::update() {
             if (item->getType() == COIN) {
                 playerGold += 10;
             } else if (item->getType() == HEALTH) {
-                player->takeDamage(-10); // Simple trick: taking negative damage heals!
-                std::cout << "Healed 10 HP!" << std::endl;
+                player->takeDamage(-10); // Heals 10 HP
             }
             item->collect();
             if (bumpSound) SoundManager::playSound(bumpSound);
@@ -299,17 +376,16 @@ void PlayState::render() {
         if (enemy->getIsActive()) enemy->render(camera);
     }
     
-    for (auto p : projectiles) {
-        p->render(camera);
-    }
-
-    for (auto i : items) {
-        i->render(camera);
+    for (auto boss : bosses) {
+        if (boss->getIsActive()) boss->render(camera);
     }
     
-    // --- NEW: Visual feedback for taking damage ---
+    for (auto p : projectiles) p->render(camera);
+    for (auto ep : enemyProjectiles) ep->render(camera);
+    for (auto i : items) i->render(camera);
+    
     if (invincibilityFrames > 0 && (invincibilityFrames / 5) % 2 == 0) {
-        // Skip rendering player every few frames to create a blinking/flashing effect
+        // Blinking effect
     } else {
         player->render(camera);
     }
@@ -344,8 +420,12 @@ void PlayState::render() {
 void PlayState::loadLevel(int levelNumber) {
     for (auto enemy : enemies) delete enemy;
     enemies.clear();
+    for (auto boss : bosses) delete boss;
+    bosses.clear();
     for (auto p : projectiles) delete p;
     projectiles.clear();
+    for (auto ep : enemyProjectiles) delete ep;
+    enemyProjectiles.clear();
     for (auto i : items) delete i;
     items.clear();
     
@@ -365,6 +445,8 @@ void PlayState::loadLevel(int levelNumber) {
         while (file >> type >> texture >> startX >> startY) {
             if (type == "NPC") {
                 enemies.push_back(new NPC(texture.c_str(), game->getRenderer(), startX, startY));
+            } else if (type == "BOSS") { // --- NEW: Parse Boss entities ---
+                bosses.push_back(new Boss(texture.c_str(), game->getRenderer(), startX, startY));
             }
         }
         file.close();

@@ -4,9 +4,10 @@
 #include "GameState.h"
 #include "GameObject.h"
 #include "NPC.h"
+#include "Boss.h" // NEW: Include the Boss class
 #include "Map.h"
 #include "Projectile.h" 
-#include "Item.h" // NEW: Include the Item class
+#include "Item.h" 
 #include <vector>
 #include <SDL2/SDL_mixer.h>
 #include <SDL2/SDL_ttf.h> 
@@ -24,8 +25,12 @@ private:
     
     GameObject* player;
     std::vector<NPC*> enemies;
+    std::vector<Boss*> bosses; // NEW: Track bosses
+    
     std::vector<Projectile*> projectiles; 
-    std::vector<Item*> items; // NEW: Track dropped items on the ground
+    std::vector<Projectile*> enemyProjectiles; // NEW: Track fireballs shot BY enemies
+    
+    std::vector<Item*> items; 
     Map* map;
     
     Mix_Music* bgMusic;
@@ -38,7 +43,7 @@ private:
     
     SDL_Rect camera;
     
-    // --- NEW: Map Transition Variables ---
+    // --- Map Transition Variables ---
     int currentLevel;
     void loadLevel(int levelNumber);
     
