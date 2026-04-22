@@ -38,6 +38,10 @@ private:
     
     SDL_Rect camera;
     
+    // --- NEW: Map Transition Variables ---
+    int currentLevel;
+    void loadLevel(int levelNumber);
+    
     bool checkCollision(SDL_Rect a, SDL_Rect b);
 };
 

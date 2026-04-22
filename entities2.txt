@@ -1,0 +1,5 @@
+NPC player.png 400 300
+NPC player.png 450 300
+NPC player.png 500 300
+NPC player.png 400 350
+NPC player.png 500 350

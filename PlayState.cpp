@@ -3,6 +3,7 @@
 #include "SoundManager.h"
 #include "UIManager.h"
 #include "Item.h"
+#include "GameOverState.h" // --- NEW: Include the Game Over State ---
 #include <iostream>
 #include <fstream> 
 
@@ -11,7 +12,9 @@ const std::string PlayState::stateID = "PLAY";
 // Cooldowns and Stats
 int attackCooldown = 0;
 int magicCooldown = 0; 
-int playerGold = 0; // Track collected coins
+int playerGold = 0; 
+// To prevent enemies from hitting you 60 times a second, we give the player invincibility frames
+int invincibilityFrames = 0; 
 
 bool PlayState::checkCollision(SDL_Rect a, SDL_Rect b) {
     if (a.x + a.w <= b.x) return false;
@@ -26,25 +29,11 @@ bool PlayState::onEnter() {
     
     camera = {0, 0, 800, 600};
     
-    map = new Map(game->getRenderer());
-    map->LoadMap("level1.txt"); 
-    
     player = new GameObject("player.png", game->getRenderer(), 350, 250);
     
-    std::ifstream file("entities.txt");
-    if (file.is_open()) {
-        std::string type, texture;
-        int startX, startY;
-        
-        while (file >> type >> texture >> startX >> startY) {
-            if (type == "NPC") {
-                enemies.push_back(new NPC(texture.c_str(), game->getRenderer(), startX, startY));
-            }
-        }
-        file.close();
-    } else {
-        std::cout << "Could not load entities.txt" << std::endl;
-    }
+    map = nullptr;
+    currentLevel = 1;
+    loadLevel(currentLevel);
     
     bgMusic = SoundManager::loadMusic("bgm.mp3");
     bumpSound = SoundManager::loadSound("bump.wav");
@@ -77,7 +66,7 @@ bool PlayState::onExit() {
     }
     items.clear();
     
-    delete map;
+    if (map != nullptr) delete map;
     
     Mix_FreeMusic(bgMusic);
     Mix_FreeChunk(bumpSound);
@@ -87,6 +76,12 @@ bool PlayState::onExit() {
 }
 
 void PlayState::update() {
+    // --- NEW: Check for Player Death ---
+    if (player->getHealth() <= 0) {
+        game->getStateMachine()->changeState(new GameOverState());
+        return; // Stop updating the game, we are dead!
+    }
+
     const Uint8* currentKeyStates = SDL_GetKeyboardState(NULL);
 
     if (isDialogueActive) {
@@ -95,6 +90,8 @@ void PlayState::update() {
         }
         return; 
     }
+
+    if (invincibilityFrames > 0) invincibilityFrames--;
 
     // 1. Handle Input locally
     int dx = 0; int dy = 0;
@@ -147,6 +144,13 @@ void PlayState::update() {
     // ==========================================
     player->update();
     
+    // Map Transition Trigger (Walk off the right edge)
+    if (player->getX() >= 930) {
+        currentLevel++;
+        loadLevel(currentLevel);
+        return; 
+    }
+    
     SDL_Rect col = player->getCollider();
     bool playerReverted = false;
 
@@ -186,6 +190,14 @@ void PlayState::update() {
                 enemy->revertMovement();
                 enemy->setVelocity(0, 0);
                 enemyReverted = true;
+                
+                // --- NEW: Enemies deal damage to the player! ---
+                if (invincibilityFrames == 0) {
+                    player->takeDamage(5); // Enemy hits for 5 damage
+                    invincibilityFrames = 60; // 1 second of invincibility
+                    if (bumpSound) SoundManager::playSound(bumpSound);
+                    std::cout << "Ouch! Player HP: " << player->getHealth() << std::endl;
+                }
             }
 
             if (!enemyReverted) {
@@ -202,7 +214,6 @@ void PlayState::update() {
                 player->addExperience(50); 
                 enemy->markXPRewarded();
                 
-                // --- NEW: Spawning Loot (50% chance for Coin, 20% for Heart) ---
                 int roll = rand() % 100;
                 if (roll < 50) {
                     items.push_back(new Item(game->getRenderer(), enemy->getX(), enemy->getY(), COIN));
@@ -252,9 +263,7 @@ void PlayState::update() {
             if (item->getType() == COIN) {
                 playerGold += 10;
             } else if (item->getType() == HEALTH) {
-                // Heals the player by adding experience method (reuse for healing logic if needed)
-                // For simplicity, let's just say it restores 10 HP directly
-                // player->heal(10); // You can add a heal method to GameObject later
+                player->takeDamage(-10); // Simple trick: taking negative damage heals!
                 std::cout << "Healed 10 HP!" << std::endl;
             }
             item->collect();
@@ -298,7 +307,12 @@ void PlayState::render() {
         i->render(camera);
     }
     
-    player->render(camera);
+    // --- NEW: Visual feedback for taking damage ---
+    if (invincibilityFrames > 0 && (invincibilityFrames / 5) % 2 == 0) {
+        // Skip rendering player every few frames to create a blinking/flashing effect
+    } else {
+        player->render(camera);
+    }
     
     if (player->getIsAttacking()) {
         SDL_Rect attackBox = player->getAttackCollider();
@@ -309,7 +323,6 @@ void PlayState::render() {
         SDL_RenderFillRect(game->getRenderer(), &attackBox);
     }
     
-    // --- UPDATED UI DISPLAY ---
     SDL_Color hpColor = {255, 50, 50, 255}; 
     SDL_Color xpColor = {50, 150, 255, 255};
     SDL_Color levelColor = {255, 255, 50, 255};
@@ -325,4 +338,39 @@ void PlayState::render() {
     }
     
     SDL_RenderPresent(game->getRenderer());
+}
+
+// Helper method to load new maps and entities dynamically
+void PlayState::loadLevel(int levelNumber) {
+    for (auto enemy : enemies) delete enemy;
+    enemies.clear();
+    for (auto p : projectiles) delete p;
+    projectiles.clear();
+    for (auto i : items) delete i;
+    items.clear();
+    
+    if (map != nullptr) {
+        delete map;
+    }
+    
+    map = new Map(game->getRenderer());
+    std::string mapFile = "level" + std::to_string(levelNumber) + ".txt";
+    map->LoadMap(mapFile);
+    
+    std::string entityFile = "entities" + std::to_string(levelNumber) + ".txt";
+    std::ifstream file(entityFile);
+    if (file.is_open()) {
+        std::string type, texture;
+        int startX, startY;
+        while (file >> type >> texture >> startX >> startY) {
+            if (type == "NPC") {
+                enemies.push_back(new NPC(texture.c_str(), game->getRenderer(), startX, startY));
+            }
+        }
+        file.close();
+    } else {
+        std::cout << "Could not load " << entityFile << ". You beat the game!" << std::endl;
+    }
+    
+    player->setPosition(50, 250);
 }

@@ -11,17 +11,17 @@ public:
     void update();
     void render(SDL_Rect camera);
 
-    // Collision helper
+    // Collision helper methods
     SDL_Rect getCollider();
     void revertMovement();
     
-    // Combat & Stats
+    // Combat Methods
     bool getIsActive() { return isActive; }
     int getHealth() { return health; }
     void takeDamage(int amount);
     SDL_Rect getAttackCollider(); 
     
-    // --- NEW: RPG Progression Methods ---
+    // --- RPG Progression Methods ---
     void addExperience(int amount);
     int getLevel() { return level; }
     int getExperience() { return experience; }
@@ -30,11 +30,14 @@ public:
     bool hasRewardedXP() { return rewardedXP; }
     void markXPRewarded() { rewardedXP = true; }
     
+    // Animation Trigger Methods
     void triggerAttack();
     bool getIsAttacking() { return isAttacking; }
     
+    // Getters and Setters for camera tracking and map transitions
     int getX() { return xpos; }
     int getY() { return ypos; }
+    void setPosition(int x, int y) { xpos = x; ypos = y; }
 
     void setVelocity(int dx, int dy) {
         xVel = dx;
@@ -46,21 +49,24 @@ protected:
     int xVel, yVel;
     int speed;
     
+    // Animation tracking variables
     int currentFrame;
     int currentRow;
     
+    // Combat Variables
     int health;
     int maxHealth;
     bool isActive; 
     int lastDir;   
     
-    // --- NEW: RPG Stats ---
+    // RPG Stats
     int level;
     int experience;
     int nextLevelExp;
     int attackDamage;
-    bool rewardedXP; // Prevents double-claiming XP from a dead enemy
+    bool rewardedXP; 
 
+    // Attack Animation State Variables
     bool isAttacking;
     int attackTimer;
 
